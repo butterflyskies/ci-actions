@@ -6,11 +6,13 @@
 
 ## PR Structure
 
+Work is split across multiple PRs, merged in order. PR numbers are assigned at creation time, not planned in advance.
+
 | PR | Contents | Depends On |
 |----|----------|-----------|
-| **PR #1** (this plan) | This document committed to `docs/PLAN.md` | — |
-| **PR #2** (core implementation) | Phases 1–7, 9: Rust CLI, bootstrap, CI hardening, Dependabot, CODEOWNERS, attestation, TUF stubs, documentation, final lock | PR #1 |
-| **PR #3** (consumer artifacts) | Phase 8: release binary, verify-deps action, scaffold command, reusable workflow | PR #2 |
+| **Plan** | This document committed to `docs/PLAN.md` | — |
+| **Core implementation** | Phases 1–7, 9: Rust CLI, bootstrap, CI hardening, Dependabot, CODEOWNERS, attestation, TUF stubs, documentation, final lock. May be split across multiple PRs as implementation progresses. | Plan |
+| **Consumer artifacts** | Phase 8: release binary, verify-deps action, scaffold command, reusable workflow | Core implementation |
 
 ## Context
 
