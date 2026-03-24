@@ -1,0 +1,26 @@
+# DEPS.lock — Transitive dependency lockfile for ci-actions.
+#
+# This file records the expected SHA-256 digest of every action referenced
+# by composite actions in this repository. The verify-deps workflow checks
+# that each pinned commit still resolves to the same tree hash, catching
+# silent tag rewrites (the attack vector Dan Lorenc described).
+#
+# Format: one entry per line.
+#   <action>@<pinned-sha> <tree-sha256>
+#
+# To regenerate after updating a pin:
+#   ./scripts/lock-deps.sh
+#
+# To verify (runs in CI):
+#   ./scripts/verify-deps.sh
+
+# --- setup-rust ---
+actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd b4c76471127cb4a7e8d0205a8ed8b04f646baaa8
+dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 da0953cfcb4ab00eae0aeeef6b01d1c680b60482
+Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 de4ba6a6018df0511a4da69dc147f114e867f124
+
+# --- docker-publish ---
+docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd c830f788ecb91c05611eefc1d7f523c7489f1d98
+docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 9c878ab9b0595996822bd9f39a06de47958be83e
+docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf d6844f5c9a86421baf812533b78745a38b7ad8fd
+docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 22badfb80575c8445687c6683903a865b7dbb0c2

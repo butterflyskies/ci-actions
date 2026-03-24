@@ -1,0 +1,127 @@
+# Example: memory-mcp release workflow after migrating to ci-actions.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ github.ref_name }}
+      is_prerelease: ${{ contains(github.ref_name, '-') }}
+    steps:
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease_flag=""
+          if [[ "$TAG_NAME" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+          gh release create "$TAG_NAME" --draft $prerelease_flag \
+            --title "$TAG_NAME" \
+            --repo "$GH_REPO"
+
+  publish-binaries:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            build-tool: cargo
+          - target: universal-apple-darwin
+            os: macos-latest
+            build-tool: cargo
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    env:
+      RUSTC_WRAPPER: cargo-auditable
+    steps:
+      - uses: butterflyskies/ci-actions/setup-rust@main  # TODO: pin to SHA
+        with:
+          ref: ${{ needs.create-release.outputs.tag_name }}
+          cargo-tools: cargo-auditable@0.7.4
+      - uses: taiki-e/upload-rust-binary-action@0e34102c043ded9f2ca39f7af5cd99a540c61aff # v1.29.1
+        with:
+          bin: memory-mcp
+          target: ${{ matrix.target }}
+          build-tool: ${{ matrix.build-tool }}
+          features: k8s
+          archive: memory-mcp-$tag-$target
+          tar: all
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: refs/tags/${{ needs.create-release.outputs.tag_name }}
+
+  publish-crate:
+    needs: create-release
+    if: ${{ needs.create-release.outputs.is_prerelease != 'true' }}
+    uses: ./.github/workflows/publish-crate.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag_name }}
+    permissions:
+      id-token: write
+      contents: read
+
+  publish-image:
+    needs: create-release
+    if: ${{ needs.create-release.outputs.is_prerelease != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.create-release.outputs.tag_name }}
+          persist-credentials: false
+      - uses: butterflyskies/ci-actions/docker-publish@main  # TODO: pin to SHA
+        with:
+          image: butterflyskies/memory-mcp
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          tag-rules: |
+            type=semver,pattern={{version}},value=${{ needs.create-release.outputs.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.create-release.outputs.tag_name }}
+
+  publish-release:
+    needs: [create-release, publish-binaries, publish-crate, publish-image]
+    if: ${{ always() && needs.create-release.result == 'success' && needs.publish-binaries.result == 'success' && (needs.publish-crate.result == 'skipped' || needs.publish-crate.result == 'success') && (needs.publish-image.result == 'skipped' || needs.publish-image.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.create-release.outputs.tag_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit "$TAG_NAME" \
+            --draft=false \
+            --repo "$GH_REPO"
+
+  update-release-notes:
+    needs: [create-release, publish-release]
+    if: ${{ needs.create-release.outputs.is_prerelease != 'true' }}
+    uses: ./.github/workflows/update-release-notes.yml
+    with:
+      tag: ${{ needs.create-release.outputs.tag_name }}
+    permissions:
+      contents: write

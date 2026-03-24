@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly check — catches tag rewrites that happen between PRs.
+    - cron: "0 9 * * 1"
+
+permissions: {}
+
+jobs:
+  verify-deps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Verify dependency integrity
+        run: ./scripts/verify-deps.sh
+
+  lint-actions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate action.yml files
+        shell: bash
+        run: |
+          set -euo pipefail
+          errors=0
+
+          # Check that every `uses:` in action.yml files is SHA-pinned.
+          for f in */action.yml; do
+            echo "Checking ${f}..."
+            while IFS= read -r line; do
+              # Extract the ref after the @
+              ref="${line##*@}"
+              ref="${ref%%[[:space:]]*}"  # trim trailing whitespace/comments
+              # SHA pins are 40 hex chars
+              if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error file=${f}::Unpinned action reference: ${line}"
+                errors=$((errors + 1))
+              fi
+            done < <(grep -n '^\s*uses:' "$f" | grep '@')
+          done
+
+          # Check that every SHA-pinned action has a DEPS.lock entry.
+          for f in */action.yml; do
+            while IFS= read -r line; do
+              uses_value=$(echo "$line" | sed 's/.*uses:[[:space:]]*//' | sed 's/[[:space:]]*#.*//')
+              action="${uses_value%%@*}"
+              sha="${uses_value##*@}"
+              if ! grep -q "${action}@${sha}" DEPS.lock 2>/dev/null; then
+                echo "::error file=${f}::Action ${action}@${sha} not found in DEPS.lock — run scripts/lock-deps.sh"
+                errors=$((errors + 1))
+              fi
+            done < <(grep '^\s*uses:' "$f" | grep '@')
+          done
+
+          if [ "$errors" -gt 0 ]; then
+            echo "::error::${errors} action reference issue(s) found."
+            exit 1
+          fi
+          echo "All action references are SHA-pinned and locked."
