@@ -1,0 +1,99 @@
+# setup-rust — checkout, system deps, toolchain, cache, optional tool installs.
+#
+# Consolidates the 4–6 step Rust preamble that appears in every CI job.
+# All transitive action references are SHA-pinned (see DEPS.lock).
+name: Setup Rust
+description: >
+  Checkout, install system dependencies, configure Rust toolchain, and
+  populate the cargo/sccache cache. Optionally installs additional cargo
+  tools (e.g. cargo-nextest, cargo-auditable).
+
+inputs:
+  toolchain:
+    description: Rust toolchain to install (e.g. "stable", "nightly", "1.88")
+    required: false
+    default: "stable"
+  targets:
+    description: Additional compilation targets (comma-separated)
+    required: false
+    default: ""
+  components:
+    description: Additional rustup components (comma-separated, e.g. "clippy,rustfmt")
+    required: false
+    default: ""
+  cache-key:
+    description: Extra key segment for rust-cache (e.g. "msrv", "cross-aarch64")
+    required: false
+    default: ""
+  system-deps:
+    description: >
+      Whether to install system dependencies (libdbus-1-dev, pkg-config).
+      Auto-detected from runner.os, but can be forced off.
+    required: false
+    default: "auto"
+  cargo-tools:
+    description: >
+      Space-separated list of cargo tools to install via `cargo install`.
+      Each entry is "name@version" (e.g. "cargo-nextest@0.9.131 cargo-auditable@0.7.4").
+      Installs use --locked.
+    required: false
+    default: ""
+  ref:
+    description: Git ref to checkout (branch, tag, or SHA). Defaults to the triggering ref.
+    required: false
+    default: ""
+  fetch-depth:
+    description: Number of commits to fetch (0 for full history, 1 for shallow).
+    required: false
+    default: "1"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        persist-credentials: false
+
+    - name: Install system dependencies
+      if: >-
+        runner.os == 'Linux' &&
+        inputs.system-deps != 'false'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # master (2026-02-13)
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        targets: ${{ inputs.targets }}
+        components: ${{ inputs.components }}
+
+    - name: Configure cargo cache
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        key: ${{ inputs.cache-key }}
+        cache-on-failure: true
+
+    - name: Install cargo tools
+      if: inputs.cargo-tools != ''
+      shell: bash
+      # Pass through env to avoid template injection (${{ }} in run: is unsafe).
+      env:
+        CARGO_TOOLS: ${{ inputs.cargo-tools }}
+      run: |
+        set -euo pipefail
+        for tool in $CARGO_TOOLS; do
+          name="${tool%%@*}"
+          version="${tool#*@}"
+          if [ "$name" = "$version" ]; then
+            echo "::error::cargo-tools entries must be pinned: name@version (got '${tool}')"
+            exit 1
+          fi
+          echo "Installing ${name}@${version}"
+          cargo install "${name}@${version}" --locked
+        done
